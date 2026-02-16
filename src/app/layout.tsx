@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { LocaleProvider } from "@/components/locale-provider";
 import { Header } from "@/components/header";
@@ -45,6 +46,7 @@ export default function RootLayout({
             />
           </LocaleProvider>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
