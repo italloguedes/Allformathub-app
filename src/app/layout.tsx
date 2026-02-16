@@ -6,6 +6,8 @@ import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import "./globals.css";
 
+import Script from "next/script";
+
 const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -32,6 +34,12 @@ export default function RootLayout({
               <main className="flex-1">{children}</main>
               <Footer />
             </div>
+            <Script
+              async
+              src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8720603829530997"
+              crossOrigin="anonymous"
+              strategy="afterInteractive"
+            />
           </LocaleProvider>
         </ThemeProvider>
       </body>
