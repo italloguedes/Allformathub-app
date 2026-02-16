@@ -17,6 +17,9 @@ export const metadata: Metadata = {
   title: "All Format Hub — File Conversion Tool",
   description:
     "Convert files between formats. Images, documents, audio, video, and archives. No sign-up required.",
+  other: {
+    "google-adsense-account": "ca-pub-8720603829530997",
+  },
 };
 
 export default function RootLayout({
