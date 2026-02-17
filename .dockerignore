@@ -1,0 +1,12 @@
+Dockerfile
+.dockerignore
+node_modules
+npm-debug.log
+README.md
+.next
+.git
+.github
+storage
+test-output-*.png
+test-pdf-*.js
+test.pdf

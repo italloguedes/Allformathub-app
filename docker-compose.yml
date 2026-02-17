@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: convesall
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./storage:/app/storage
+    environment:
+      - NODE_ENV=production
+      - STORAGE_DIR=/app/storage/temp
+    restart: unless-stopped

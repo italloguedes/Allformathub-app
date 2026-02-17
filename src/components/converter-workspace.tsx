@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { FileDropzone, type UploadedFile } from "@/components/file-dropzone";
+import { useState, useCallback, useEffect } from "react";
+import { FileDropzone } from "@/components/file-dropzone";
 import { FormatSelector } from "@/components/format-selector";
 import { formatBytes } from "@/lib/utils";
 import { useLocale } from "@/components/locale-provider";
+import { ffmpegClient } from "@/lib/ffmpeg-client";
 import {
     ArrowRight,
     Check,
@@ -12,109 +13,101 @@ import {
     FileIcon,
     Loader2,
     Trash2,
-    X,
     Archive,
     AlertCircle,
 } from "lucide-react";
 
 interface FileEntry {
-    file: UploadedFile;
+    id: string;
+    file: File;
+    name: string;
+    size: number;
+    extension: string;
+    formatLabel: string;
     targetFormat: string | null;
-    jobId: string | null;
-    jobToken: string | null;
     status: "idle" | "converting" | "completed" | "failed";
     progress: number;
     error: string | null;
+    resultUrl: string | null;
 }
 
 export default function ConverterWorkspace() {
     const { t } = useLocale();
     const [files, setFiles] = useState<FileEntry[]>([]);
+    const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
 
-    const handleFilesUploaded = useCallback((uploaded: UploadedFile[]) => {
-        const entries: FileEntry[] = uploaded.map((f) => ({
-            file: f,
-            targetFormat: null,
-            jobId: null,
-            jobToken: null,
-            status: "idle" as const,
-            progress: 0,
-            error: null,
-        }));
-        setFiles((prev) => [...prev, ...entries]);
+    useEffect(() => {
+        // Preload ffmpeg on mount
+        ffmpegClient.load().then(() => setFfmpegLoaded(true)).catch(console.error);
+    }, []);
+
+    const handleFilesSelected = useCallback((uploadedFiles: File[]) => {
+        const newEntries: FileEntry[] = uploadedFiles.map((f) => {
+            const name = f.name;
+            const extension = name.split('.').pop()?.toLowerCase() || "";
+            return {
+                id: Math.random().toString(36).substring(7),
+                file: f,
+                name: name,
+                size: f.size,
+                extension: extension,
+                formatLabel: extension.toUpperCase(),
+                targetFormat: null,
+                status: "idle",
+                progress: 0,
+                error: null,
+                resultUrl: null,
+            };
+        });
+        setFiles((prev) => [...prev, ...newEntries]);
     }, []);
 
     const updateFileEntry = useCallback(
         (fileId: string, updates: Partial<FileEntry>) => {
             setFiles((prev) =>
-                prev.map((f) => (f.file.id === fileId ? { ...f, ...updates } : f))
+                prev.map((f) => (f.id === fileId ? { ...f, ...updates } : f))
             );
         },
         []
     );
 
     const removeFile = useCallback((fileId: string) => {
-        setFiles((prev) => prev.filter((f) => f.file.id !== fileId));
+        setFiles((prev) => {
+            const file = prev.find(f => f.id === fileId);
+            if (file?.resultUrl) {
+                URL.revokeObjectURL(file.resultUrl);
+            }
+            return prev.filter((f) => f.id !== fileId);
+        });
     }, []);
 
     const convertFile = useCallback(
         async (entry: FileEntry) => {
             if (!entry.targetFormat) return;
 
-            updateFileEntry(entry.file.id, {
+            updateFileEntry(entry.id, {
                 status: "converting",
                 progress: 0,
                 error: null,
             });
 
             try {
-                const res = await fetch("/api/convert", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        fileId: entry.file.id,
-                        fileName: entry.file.name,
-                        inputPath: entry.file.path,
-                        inputFormat: entry.file.extension,
-                        outputFormat: entry.targetFormat,
-                        token: entry.file.token,
-                    }),
+                const blob = await ffmpegClient.transcode(
+                    entry.file,
+                    entry.targetFormat,
+                    (progress) => updateFileEntry(entry.id, { progress })
+                );
+
+                const url = URL.createObjectURL(blob);
+
+                updateFileEntry(entry.id, {
+                    status: "completed",
+                    progress: 100,
+                    resultUrl: url,
                 });
-
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || "Conversion failed");
-
-                updateFileEntry(entry.file.id, {
-                    jobId: data.jobId,
-                    jobToken: data.token,
-                });
-
-                const poll = async () => {
-                    const statusRes = await fetch(`/api/status/${data.jobId}`);
-                    const statusData = await statusRes.json();
-
-                    if (statusData.status === "completed") {
-                        updateFileEntry(entry.file.id, {
-                            status: "completed",
-                            progress: 100,
-                            jobToken: statusData.token,
-                        });
-                    } else if (statusData.status === "failed") {
-                        updateFileEntry(entry.file.id, {
-                            status: "failed",
-                            error: statusData.error || "Conversion failed",
-                        });
-                    } else {
-                        updateFileEntry(entry.file.id, {
-                            progress: statusData.progress || 0,
-                        });
-                        setTimeout(poll, 500);
-                    }
-                };
-
-                setTimeout(poll, 300);
             } catch (err) {
-                updateFileEntry(entry.file.id, {
+                console.error("Conversion error:", err);
+                updateFileEntry(entry.id, {
                     status: "failed",
                     error: err instanceof Error ? err.message : "Conversion failed",
                 });
@@ -132,22 +125,17 @@ export default function ConverterWorkspace() {
     }, [files, convertFile]);
 
     const downloadFile = useCallback((entry: FileEntry) => {
-        if (entry.jobId && entry.jobToken) {
-            const url = `/api/download/${entry.jobId}?token=${entry.jobToken}`;
+        if (entry.resultUrl) {
             const a = document.createElement("a");
-            a.href = url;
-            a.download = "";
+            a.href = entry.resultUrl;
+            const originalName = entry.name.substring(0, entry.name.lastIndexOf("."));
+            a.download = `${originalName}.${entry.targetFormat}`;
             a.click();
         }
     }, []);
 
-    const downloadAllAsZip = useCallback(async () => {
+    const downloadAll = useCallback(() => {
         const completed = files.filter((f) => f.status === "completed");
-        if (completed.length === 0) return;
-        if (completed.length === 1) {
-            downloadFile(completed[0]);
-            return;
-        }
         completed.forEach((f) => downloadFile(f));
     }, [files, downloadFile]);
 
@@ -157,7 +145,7 @@ export default function ConverterWorkspace() {
 
     return (
         <div className="max-w-screen-lg mx-auto space-y-6">
-            <FileDropzone onFilesUploaded={handleFilesUploaded} />
+            <FileDropzone onFilesSelected={handleFilesSelected} />
 
             {files.length > 0 && (
                 <div className="space-y-4">
@@ -168,7 +156,7 @@ export default function ConverterWorkspace() {
                         <div className="flex items-center gap-2">
                             {hasCompletedFiles && (
                                 <button
-                                    onClick={downloadAllAsZip}
+                                    onClick={downloadAll}
                                     className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors"
                                 >
                                     <Archive className="h-3.5 w-3.5" />
@@ -189,7 +177,7 @@ export default function ConverterWorkspace() {
 
                     <div className="divide-y divide-neutral-100 dark:divide-neutral-800/50 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-950">
                         {files.map((entry) => (
-                            <div key={entry.file.id} className="px-4 py-3.5">
+                            <div key={entry.id} className="px-4 py-3.5">
                                 <div className="flex items-center gap-4">
                                     <div className="flex items-center gap-3 min-w-0 flex-1">
                                         <div className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 flex-shrink-0">
@@ -197,10 +185,10 @@ export default function ConverterWorkspace() {
                                         </div>
                                         <div className="min-w-0">
                                             <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200 truncate">
-                                                {entry.file.originalName}
+                                                {entry.name}
                                             </p>
                                             <p className="text-xs text-neutral-500 dark:text-neutral-500">
-                                                {entry.file.formatLabel} — {formatBytes(entry.file.size)}
+                                                {entry.formatLabel} — {formatBytes(entry.size)}
                                             </p>
                                         </div>
                                     </div>
@@ -210,10 +198,10 @@ export default function ConverterWorkspace() {
                                     <div className="w-52 flex-shrink-0">
                                         {entry.status === "idle" ? (
                                             <FormatSelector
-                                                inputExtension={entry.file.extension}
+                                                inputExtension={entry.extension}
                                                 selectedFormat={entry.targetFormat}
                                                 onFormatSelect={(format) =>
-                                                    updateFileEntry(entry.file.id, {
+                                                    updateFileEntry(entry.id, {
                                                         targetFormat: format,
                                                     })
                                                 }
@@ -263,7 +251,7 @@ export default function ConverterWorkspace() {
                                             </div>
                                         )}
                                         <button
-                                            onClick={() => removeFile(entry.file.id)}
+                                            onClick={() => removeFile(entry.id)}
                                             className="p-1.5 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-neutral-400 dark:text-neutral-600"
                                         >
                                             <Trash2 className="h-3.5 w-3.5" />
