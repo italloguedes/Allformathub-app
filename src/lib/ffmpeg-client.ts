@@ -48,7 +48,7 @@ export class FFmpegClient {
         await ffmpeg.exec(args);
 
         const data = await ffmpeg.readFile(outputName);
-        return new Blob([data], { type: `video/${targetFormat}` });
+        return new Blob([data as any], { type: `video/${targetFormat}` });
     }
 }
 
