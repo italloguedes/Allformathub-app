@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["sharp", "archiver", "@napi-rs/canvas", "pdfjs-dist", "pdf-lib", "fluent-ffmpeg", "canvas", "pdftoimg-js"],
+  outputFileTracingIncludes: {
+    "/*": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+  },
   experimental: {
     serverActions: {
       bodySizeLimit: "100mb",

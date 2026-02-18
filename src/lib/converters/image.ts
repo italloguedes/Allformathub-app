@@ -1,6 +1,8 @@
 import sharp from "sharp";
 import fs from "fs";
+import path from "path";
 import { PDFDocument } from "pdf-lib";
+import { createCanvas } from "@napi-rs/canvas";
 
 const FORMAT_MAP: Record<string, keyof sharp.FormatEnum> = {
     jpg: "jpeg",
@@ -11,8 +13,6 @@ const FORMAT_MAP: Record<string, keyof sharp.FormatEnum> = {
     tiff: "tiff",
     avif: "avif",
 };
-
-const { singlePdfToImg } = require("pdftoimg-js");
 
 export async function convertImage(
     inputPath: string,
@@ -89,21 +89,41 @@ async function imageToPdf(inputPath: string, outputPath: string): Promise<void> 
 
 async function pdfToImage(inputPath: string, outputPath: string, targetFormat: string): Promise<void> {
     const ext = targetFormat.toLowerCase();
-
-    // Use pdftoimg-js to get base64 PNG of first page
-    // output is array of data URIs
-    const results = await singlePdfToImg(inputPath, {
-        page: 1,
-        scale: 2.0
-    });
-
-    if (!results || results.length === 0) {
-        throw new Error("Failed to render PDF page");
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const workerPath = path.join(
+        process.cwd(),
+        "node_modules",
+        "pdfjs-dist",
+        "legacy",
+        "build",
+        "pdf.worker.mjs"
+    );
+    if (fs.existsSync(workerPath)) {
+        pdfjs.GlobalWorkerOptions.workerSrc = workerPath;
     }
 
-    const dataUri = results[0];
-    const base64Data = dataUri.replace(/^data:image\/png;base64,/, "");
-    const buffer = Buffer.from(base64Data, "base64");
+    const pdfBytes = fs.readFileSync(inputPath);
+    const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(pdfBytes),
+        isEvalSupported: false,
+        useSystemFonts: true,
+    });
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2.0 });
+
+    const width = Math.max(1, Math.ceil(viewport.width));
+    const height = Math.max(1, Math.ceil(viewport.height));
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+
+    await page.render({
+        canvas: null,
+        canvasContext: ctx as unknown as CanvasRenderingContext2D,
+        viewport,
+    }).promise;
+
+    const buffer = canvas.toBuffer("image/png");
 
     const pipeline = sharp(buffer);
 
