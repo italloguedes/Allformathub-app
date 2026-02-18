@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { conversionQueue } from "@/lib/queue";
 
+export const runtime = "nodejs";
+
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }

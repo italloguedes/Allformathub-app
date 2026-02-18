@@ -5,6 +5,8 @@ import { sanitizeFilename, generateId } from "@/lib/utils";
 import { getStoragePath, writeFile, generateToken } from "@/lib/storage";
 import { detectCategory, getFormatInfo } from "@/lib/formats";
 
+export const runtime = "nodejs";
+
 export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData();
@@ -55,9 +57,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ files: results });
     } catch (error) {
         console.error("Upload error:", error);
+        const message = error instanceof Error ? error.message : "Unknown upload error";
+        const status =
+            message.toLowerCase().includes("size") ||
+            message.toLowerCase().includes("large") ||
+            message.toLowerCase().includes("limit")
+                ? 413
+                : 500;
         return NextResponse.json(
-            { error: "Upload failed" },
-            { status: 500 }
+            { error: `Upload failed: ${message}` },
+            { status }
         );
     }
 }

@@ -5,6 +5,8 @@ import { convert } from "@/lib/converter";
 import { getOutputPath, generateToken } from "@/lib/storage";
 import { generateId, sanitizeFilename } from "@/lib/utils";
 
+export const runtime = "nodejs";
+
 // Initialize the processor
 conversionQueue.setProcessor(async (job: ConversionJob) => {
     await convert(job.inputPath, job.outputPath, job.inputFormat, job.outputFormat);

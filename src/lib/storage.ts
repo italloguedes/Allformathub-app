@@ -1,8 +1,25 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import crypto from "crypto";
 
-const STORAGE_DIR = process.env.STORAGE_DIR || "./storage/temp";
+function resolveStorageDir(): string {
+    const configured = process.env.STORAGE_DIR?.trim();
+    if (configured) {
+        return path.isAbsolute(configured)
+            ? configured
+            : path.resolve(process.cwd(), configured);
+    }
+
+    // Vercel serverless filesystem is read-only except /tmp.
+    if (process.env.VERCEL === "1" || process.env.VERCEL_ENV) {
+        return path.join(os.tmpdir(), "allformathub-storage");
+    }
+
+    return path.resolve(process.cwd(), "./storage/temp");
+}
+
+const STORAGE_DIR = resolveStorageDir();
 const CLEANUP_MINUTES = parseInt(process.env.CLEANUP_INTERVAL_MINUTES || "30", 10);
 
 function ensureDir(dir: string) {

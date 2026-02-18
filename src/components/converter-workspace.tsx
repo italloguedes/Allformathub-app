@@ -50,6 +50,32 @@ async function parseJsonSafely(response: Response): Promise<unknown> {
     }
 }
 
+async function fetchWithRetry(
+    input: RequestInfo | URL,
+    init: RequestInit,
+    retries = 2,
+    delayMs = 400
+): Promise<Response> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const response = await fetch(input, init);
+            if (response.status >= 500 && attempt < retries) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+                continue;
+            }
+            return response;
+        } catch (error) {
+            lastError = error;
+            if (attempt < retries) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+                continue;
+            }
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Network request failed");
+}
+
 export default function ConverterWorkspace() {
     const { t } = useLocale();
     const [files, setFiles] = useState<FileEntry[]>([]);
@@ -107,7 +133,7 @@ export default function ConverterWorkspace() {
             try {
                 const upload = new FormData();
                 upload.append("files", entry.file);
-                const uploadRes = await fetch("/api/upload", {
+                const uploadRes = await fetchWithRetry("/api/upload", {
                     method: "POST",
                     body: upload,
                 });
