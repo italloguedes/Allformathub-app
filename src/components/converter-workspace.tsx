@@ -30,6 +30,26 @@ interface FileEntry {
     resultUrl: string | null;
 }
 
+async function parseJsonSafely(response: Response): Promise<unknown> {
+    const contentType = response.headers.get("content-type") || "";
+    const bodyText = await response.text();
+
+    if (!bodyText) return {};
+    if (contentType.toLowerCase().includes("application/json")) {
+        try {
+            return JSON.parse(bodyText);
+        } catch {
+            return {};
+        }
+    }
+
+    try {
+        return JSON.parse(bodyText);
+    } catch {
+        return { error: bodyText };
+    }
+}
+
 export default function ConverterWorkspace() {
     const { t } = useLocale();
     const [files, setFiles] = useState<FileEntry[]>([]);
@@ -91,9 +111,18 @@ export default function ConverterWorkspace() {
                     method: "POST",
                     body: upload,
                 });
-                const uploadBody = await uploadRes.json();
+                const uploadBody = await parseJsonSafely(uploadRes) as {
+                    error?: string;
+                    files?: Array<{
+                        id?: string;
+                        path?: string;
+                        extension?: string;
+                        name?: string;
+                        error?: string;
+                    }>;
+                };
                 if (!uploadRes.ok) {
-                    throw new Error(uploadBody?.error || "Upload failed");
+                    throw new Error(uploadBody?.error || `Upload failed (${uploadRes.status})`);
                 }
 
                 const uploaded = uploadBody?.files?.[0];
@@ -114,7 +143,11 @@ export default function ConverterWorkspace() {
                         outputFormat: entry.targetFormat,
                     }),
                 });
-                const convertBody = await convertRes.json();
+                const convertBody = await parseJsonSafely(convertRes) as {
+                    error?: string;
+                    jobId?: string;
+                    token?: string;
+                };
                 if (!convertRes.ok) {
                     throw new Error(convertBody?.error || "Failed to queue conversion");
                 }
@@ -135,7 +168,11 @@ export default function ConverterWorkspace() {
                     }
 
                     const statusRes = await fetch(`/api/status/${jobId}`, { cache: "no-store" });
-                    const statusBody = await statusRes.json();
+                    const statusBody = await parseJsonSafely(statusRes) as {
+                        error?: string;
+                        status?: "queued" | "processing" | "completed" | "failed";
+                        progress?: number;
+                    };
                     if (!statusRes.ok) {
                         throw new Error(statusBody?.error || "Failed to check conversion status");
                     }
@@ -161,7 +198,7 @@ export default function ConverterWorkspace() {
 
                 const downloadRes = await fetch(`/api/download/${jobId}?token=${encodeURIComponent(token)}`);
                 if (!downloadRes.ok) {
-                    const downloadBody = await downloadRes.json().catch(() => ({}));
+                    const downloadBody = await parseJsonSafely(downloadRes) as { error?: string };
                     throw new Error(downloadBody?.error || "Failed to download converted file");
                 }
 
