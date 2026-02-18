@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { FileDropzone } from "@/components/file-dropzone";
 import { FormatSelector } from "@/components/format-selector";
 import { formatBytes } from "@/lib/utils";
 import { useLocale } from "@/components/locale-provider";
-import { ffmpegClient } from "@/lib/ffmpeg-client";
 import {
     ArrowRight,
     Check,
@@ -34,12 +33,6 @@ interface FileEntry {
 export default function ConverterWorkspace() {
     const { t } = useLocale();
     const [files, setFiles] = useState<FileEntry[]>([]);
-    const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
-
-    useEffect(() => {
-        // Preload ffmpeg on mount
-        ffmpegClient.load().then(() => setFfmpegLoaded(true)).catch(console.error);
-    }, []);
 
     const handleFilesSelected = useCallback((uploadedFiles: File[]) => {
         const newEntries: FileEntry[] = uploadedFiles.map((f) => {
@@ -92,11 +85,87 @@ export default function ConverterWorkspace() {
             });
 
             try {
-                const blob = await ffmpegClient.transcode(
-                    entry.file,
-                    entry.targetFormat,
-                    (progress) => updateFileEntry(entry.id, { progress })
-                );
+                const upload = new FormData();
+                upload.append("files", entry.file);
+                const uploadRes = await fetch("/api/upload", {
+                    method: "POST",
+                    body: upload,
+                });
+                const uploadBody = await uploadRes.json();
+                if (!uploadRes.ok) {
+                    throw new Error(uploadBody?.error || "Upload failed");
+                }
+
+                const uploaded = uploadBody?.files?.[0];
+                if (!uploaded || uploaded.error || !uploaded.id || !uploaded.path || !uploaded.extension) {
+                    throw new Error(uploaded?.error || "Invalid upload response");
+                }
+
+                updateFileEntry(entry.id, { progress: 15 });
+
+                const convertRes = await fetch("/api/convert", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        fileId: uploaded.id,
+                        fileName: uploaded.name,
+                        inputPath: uploaded.path,
+                        inputFormat: uploaded.extension,
+                        outputFormat: entry.targetFormat,
+                    }),
+                });
+                const convertBody = await convertRes.json();
+                if (!convertRes.ok) {
+                    throw new Error(convertBody?.error || "Failed to queue conversion");
+                }
+
+                const jobId = convertBody?.jobId as string | undefined;
+                const token = convertBody?.token as string | undefined;
+                if (!jobId || !token) {
+                    throw new Error("Invalid conversion job response");
+                }
+
+                const maxWaitMs = 10 * 60 * 1000;
+                const pollIntervalMs = 800;
+                const startedAt = Date.now();
+
+                while (true) {
+                    if (Date.now() - startedAt > maxWaitMs) {
+                        throw new Error("Conversion timeout");
+                    }
+
+                    const statusRes = await fetch(`/api/status/${jobId}`, { cache: "no-store" });
+                    const statusBody = await statusRes.json();
+                    if (!statusRes.ok) {
+                        throw new Error(statusBody?.error || "Failed to check conversion status");
+                    }
+
+                    if (statusBody.status === "failed") {
+                        throw new Error(statusBody?.error || "Conversion failed");
+                    }
+
+                    if (statusBody.status === "completed") {
+                        updateFileEntry(entry.id, { progress: 95 });
+                        break;
+                    }
+
+                    const serverProgress =
+                        typeof statusBody.progress === "number"
+                            ? Math.max(0, Math.min(100, statusBody.progress))
+                            : 0;
+                    const uiProgress = Math.max(20, Math.min(90, 20 + Math.floor(serverProgress * 0.7)));
+                    updateFileEntry(entry.id, { progress: uiProgress });
+
+                    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+                }
+
+                const downloadRes = await fetch(`/api/download/${jobId}?token=${encodeURIComponent(token)}`);
+                if (!downloadRes.ok) {
+                    const downloadBody = await downloadRes.json().catch(() => ({}));
+                    throw new Error(downloadBody?.error || "Failed to download converted file");
+                }
+
+                const blob = await downloadRes.blob();
 
                 const url = URL.createObjectURL(blob);
 
@@ -117,11 +186,13 @@ export default function ConverterWorkspace() {
     );
 
     const convertAll = useCallback(() => {
-        files.forEach((entry) => {
-            if (entry.status === "idle" && entry.targetFormat) {
-                convertFile(entry);
+        void (async () => {
+            for (const entry of files) {
+                if (entry.status === "idle" && entry.targetFormat) {
+                    await convertFile(entry);
+                }
             }
-        });
+        })();
     }, [files, convertFile]);
 
     const downloadFile = useCallback((entry: FileEntry) => {
