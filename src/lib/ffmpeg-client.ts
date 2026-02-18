@@ -54,7 +54,9 @@ export class FFmpegClient {
                     data instanceof Uint8Array
                         ? data
                         : new TextEncoder().encode(String(data));
-                return new Blob([bytes], { type: this.getMimeType(targetFormat) });
+                const normalized = new Uint8Array(bytes.byteLength);
+                normalized.set(bytes);
+                return new Blob([normalized], { type: this.getMimeType(targetFormat) });
             } finally {
                 // Best-effort cleanup in ffmpeg virtual FS.
                 try {
