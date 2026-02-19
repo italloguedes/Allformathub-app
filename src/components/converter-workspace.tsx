@@ -5,6 +5,7 @@ import { FileDropzone } from "@/components/file-dropzone";
 import { FormatSelector } from "@/components/format-selector";
 import { formatBytes } from "@/lib/utils";
 import { useLocale } from "@/components/locale-provider";
+import { getRuntimeMaxUploadBytes, getRuntimeMaxUploadMB } from "@/lib/upload-limits";
 import {
     ArrowRight,
     Check,
@@ -81,9 +82,17 @@ export default function ConverterWorkspace() {
     const [files, setFiles] = useState<FileEntry[]>([]);
 
     const handleFilesSelected = useCallback((uploadedFiles: File[]) => {
+        const maxUploadBytes = getRuntimeMaxUploadBytes();
+        const maxUploadMb = getRuntimeMaxUploadMB();
+
         const newEntries: FileEntry[] = uploadedFiles.map((f) => {
             const name = f.name;
             const extension = name.split('.').pop()?.toLowerCase() || "";
+            const tooLarge = f.size > maxUploadBytes;
+            const errorMessage = tooLarge
+                ? `File exceeds upload limit of ${maxUploadMb}MB (${formatBytes(f.size)} selected)`
+                : null;
+
             return {
                 id: Math.random().toString(36).substring(7),
                 file: f,
@@ -92,9 +101,9 @@ export default function ConverterWorkspace() {
                 extension: extension,
                 formatLabel: extension.toUpperCase(),
                 targetFormat: null,
-                status: "idle",
+                status: tooLarge ? "failed" : "idle",
                 progress: 0,
-                error: null,
+                error: errorMessage,
                 resultUrl: null,
             };
         });

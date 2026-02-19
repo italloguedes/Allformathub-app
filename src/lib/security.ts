@@ -1,6 +1,7 @@
 import path from "path";
+import { getRuntimeMaxUploadBytes, getRuntimeMaxUploadMB } from "@/lib/upload-limits";
 
-const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE_MB || "100", 10) * 1024 * 1024;
+const MAX_FILE_SIZE = getRuntimeMaxUploadBytes();
 
 const BLOCKED_EXTENSIONS = new Set([
     "exe", "bat", "cmd", "com", "msi", "scr", "pif",
@@ -29,7 +30,7 @@ export function validateFileSize(size: number): ValidationResult {
     if (size > MAX_FILE_SIZE) {
         return {
             valid: false,
-            error: `File exceeds maximum size of ${process.env.MAX_FILE_SIZE_MB || 100}MB`,
+            error: `File exceeds maximum size of ${getRuntimeMaxUploadMB()}MB`,
         };
     }
     return { valid: true };
@@ -76,5 +77,5 @@ export function validateFile(
 }
 
 export function getMaxFileSizeMB(): number {
-    return parseInt(process.env.MAX_FILE_SIZE_MB || "100", 10);
+    return getRuntimeMaxUploadMB();
 }

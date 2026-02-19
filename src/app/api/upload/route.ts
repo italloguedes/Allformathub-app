@@ -4,11 +4,21 @@ import { validateFile } from "@/lib/security";
 import { sanitizeFilename, generateId } from "@/lib/utils";
 import { getStoragePath, writeFile, generateToken } from "@/lib/storage";
 import { detectCategory, getFormatInfo } from "@/lib/formats";
+import { getRuntimeMaxUploadBytes, getRuntimeMaxUploadMB } from "@/lib/upload-limits";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
     try {
+        const contentLength = Number(request.headers.get("content-length") || "0");
+        const maxUploadBytes = getRuntimeMaxUploadBytes();
+        if (Number.isFinite(contentLength) && contentLength > maxUploadBytes) {
+            return NextResponse.json(
+                { error: `Upload failed: file exceeds maximum request size of ${getRuntimeMaxUploadMB()}MB` },
+                { status: 413 }
+            );
+        }
+
         const formData = await request.formData();
         const files = formData.getAll("files") as File[];
 
