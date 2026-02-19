@@ -21,6 +21,9 @@ export function Header() {
                     <Link href="/convert" className="text-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors">
                         {t.converter}
                     </Link>
+                    <Link href="/merge-pdf" className="text-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors">
+                        {t.mergePdfNav}
+                    </Link>
                     <Link href="/about" className="text-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors hidden sm:block">
                         {t.about}
                     </Link>

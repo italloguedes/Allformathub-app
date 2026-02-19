@@ -3,9 +3,10 @@
 import { useState, useCallback } from "react";
 import { FileDropzone } from "@/components/file-dropzone";
 import { FormatSelector } from "@/components/format-selector";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes, sanitizeFilename } from "@/lib/utils";
 import { useLocale } from "@/components/locale-provider";
 import { getRuntimeMaxUploadBytes, getRuntimeMaxUploadMB } from "@/lib/upload-limits";
+import { MergePdfWindow } from "@/components/merge-pdf-window";
 import {
     ArrowRight,
     Check,
@@ -29,6 +30,13 @@ interface FileEntry {
     progress: number;
     error: string | null;
     resultUrl: string | null;
+}
+
+interface UploadedFileData {
+    id: string;
+    path: string;
+    extension: string;
+    name?: string;
 }
 
 async function parseJsonSafely(response: Response): Promise<unknown> {
@@ -80,6 +88,13 @@ async function fetchWithRetry(
 export default function ConverterWorkspace() {
     const { t } = useLocale();
     const [files, setFiles] = useState<FileEntry[]>([]);
+    const [isMergingPdf, setIsMergingPdf] = useState(false);
+    const [mergedPdfUrl, setMergedPdfUrl] = useState<string | null>(null);
+    const [mergePdfError, setMergePdfError] = useState<string | null>(null);
+    const [isMergeWindowOpen, setIsMergeWindowOpen] = useState(false);
+    const [mergeOutputName, setMergeOutputName] = useState("merged-files.pdf");
+    const [mergeOrderIds, setMergeOrderIds] = useState<string[]>([]);
+    const [mergedPdfName, setMergedPdfName] = useState("merged-files.pdf");
 
     const handleFilesSelected = useCallback((uploadedFiles: File[]) => {
         const maxUploadBytes = getRuntimeMaxUploadBytes();
@@ -129,6 +144,40 @@ export default function ConverterWorkspace() {
         });
     }, []);
 
+    const uploadFileForServer = useCallback(async (entry: FileEntry): Promise<UploadedFileData> => {
+        const upload = new FormData();
+        upload.append("files", entry.file);
+        const uploadRes = await fetchWithRetry("/api/upload", {
+            method: "POST",
+            body: upload,
+        });
+        const uploadBody = await parseJsonSafely(uploadRes) as {
+            error?: string;
+            files?: Array<{
+                id?: string;
+                path?: string;
+                extension?: string;
+                name?: string;
+                error?: string;
+            }>;
+        };
+        if (!uploadRes.ok) {
+            throw new Error(uploadBody?.error || `Upload failed (${uploadRes.status})`);
+        }
+
+        const uploaded = uploadBody?.files?.[0];
+        if (!uploaded || uploaded.error || !uploaded.id || !uploaded.path || !uploaded.extension) {
+            throw new Error(uploaded?.error || "Invalid upload response");
+        }
+
+        return {
+            id: uploaded.id,
+            path: uploaded.path,
+            extension: uploaded.extension,
+            name: uploaded.name,
+        };
+    }, []);
+
     const convertFile = useCallback(
         async (entry: FileEntry) => {
             if (!entry.targetFormat) return;
@@ -140,30 +189,7 @@ export default function ConverterWorkspace() {
             });
 
             try {
-                const upload = new FormData();
-                upload.append("files", entry.file);
-                const uploadRes = await fetchWithRetry("/api/upload", {
-                    method: "POST",
-                    body: upload,
-                });
-                const uploadBody = await parseJsonSafely(uploadRes) as {
-                    error?: string;
-                    files?: Array<{
-                        id?: string;
-                        path?: string;
-                        extension?: string;
-                        name?: string;
-                        error?: string;
-                    }>;
-                };
-                if (!uploadRes.ok) {
-                    throw new Error(uploadBody?.error || `Upload failed (${uploadRes.status})`);
-                }
-
-                const uploaded = uploadBody?.files?.[0];
-                if (!uploaded || uploaded.error || !uploaded.id || !uploaded.path || !uploaded.extension) {
-                    throw new Error(uploaded?.error || "Invalid upload response");
-                }
+                const uploaded = await uploadFileForServer(entry);
 
                 updateFileEntry(entry.id, { progress: 15 });
 
@@ -254,7 +280,7 @@ export default function ConverterWorkspace() {
                 });
             }
         },
-        [updateFileEntry]
+        [updateFileEntry, uploadFileForServer]
     );
 
     const convertAll = useCallback(() => {
@@ -266,6 +292,99 @@ export default function ConverterWorkspace() {
             }
         })();
     }, [files, convertFile]);
+
+    const openMergeWindow = useCallback(() => {
+        const eligible = files.filter((f) => f.status !== "failed");
+        if (eligible.length < 2) return;
+        setMergeOrderIds(eligible.map((f) => f.id));
+        setMergeOutputName("merged-files.pdf");
+        setMergePdfError(null);
+        setIsMergeWindowOpen(true);
+    }, [files]);
+
+    const moveMergeFile = useCallback((fileId: string, direction: -1 | 1) => {
+        setMergeOrderIds((prev) => {
+            const index = prev.indexOf(fileId);
+            if (index === -1) return prev;
+            const nextIndex = index + direction;
+            if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+            const next = [...prev];
+            const [item] = next.splice(index, 1);
+            next.splice(nextIndex, 0, item);
+            return next;
+        });
+    }, []);
+
+    const mergeAllToPdf = useCallback(() => {
+        void (async () => {
+            const eligibleMap = new Map(
+                files.filter((f) => f.status !== "failed").map((f) => [f.id, f])
+            );
+            const orderedEligible = mergeOrderIds
+                .map((id) => eligibleMap.get(id))
+                .filter((entry): entry is FileEntry => !!entry);
+
+            if (orderedEligible.length === 0) {
+                setMergePdfError(t.failed);
+                return;
+            }
+
+            setIsMergingPdf(true);
+            setMergePdfError(null);
+            if (mergedPdfUrl) {
+                URL.revokeObjectURL(mergedPdfUrl);
+                setMergedPdfUrl(null);
+            }
+
+            try {
+                const uploadedFiles: UploadedFileData[] = [];
+                for (const entry of orderedEligible) {
+                    const uploaded = await uploadFileForServer(entry);
+                    uploadedFiles.push(uploaded);
+                }
+
+                const normalizedOutputName = sanitizeFilename(
+                    mergeOutputName.trim() || "merged-files.pdf"
+                );
+                const mergeRes = await fetch("/api/merge-pdf", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        outputName: normalizedOutputName,
+                        files: uploadedFiles.map((file, index) => ({
+                            inputPath: file.path,
+                            inputFormat: file.extension,
+                            fileName: orderedEligible[index]?.name || file.name || `file-${index + 1}`,
+                        })),
+                    }),
+                });
+
+                if (!mergeRes.ok) {
+                    const errorBody = await parseJsonSafely(mergeRes) as { error?: string };
+                    throw new Error(errorBody?.error || "Failed to merge files into PDF");
+                }
+
+                const mergedBlob = await mergeRes.blob();
+                const url = URL.createObjectURL(mergedBlob);
+                setMergedPdfUrl(url);
+                setMergedPdfName(normalizedOutputName.toLowerCase().endsWith(".pdf") ? normalizedOutputName : `${normalizedOutputName}.pdf`);
+                setIsMergeWindowOpen(false);
+            } catch (error) {
+                console.error("Merge PDF error:", error);
+                setMergePdfError(error instanceof Error ? error.message : t.failed);
+            } finally {
+                setIsMergingPdf(false);
+            }
+        })();
+    }, [files, mergeOrderIds, mergedPdfUrl, mergeOutputName, t.failed, uploadFileForServer]);
+
+    const downloadMergedPdf = useCallback(() => {
+        if (!mergedPdfUrl) return;
+        const a = document.createElement("a");
+        a.href = mergedPdfUrl;
+        a.download = mergedPdfName;
+        a.click();
+    }, [mergedPdfName, mergedPdfUrl]);
 
     const downloadFile = useCallback((entry: FileEntry) => {
         if (entry.resultUrl) {
@@ -285,6 +404,11 @@ export default function ConverterWorkspace() {
     const hasIdleFiles = files.some((f) => f.status === "idle" && f.targetFormat);
     const hasCompletedFiles = files.some((f) => f.status === "completed");
     const completedCount = files.filter((f) => f.status === "completed").length;
+    const mergeEligibleCount = files.filter((f) => f.status !== "failed").length;
+    const canMergeToPdf = mergeEligibleCount > 1;
+    const orderedMergeFiles = mergeOrderIds
+        .map((id) => files.find((f) => f.id === id))
+        .filter((entry): entry is FileEntry => !!entry && entry.status !== "failed");
 
     return (
         <div className="max-w-screen-lg mx-auto space-y-6">
@@ -297,6 +421,24 @@ export default function ConverterWorkspace() {
                             {t.filesQueued(files.length)}
                         </p>
                         <div className="flex items-center gap-2">
+                            <button
+                                onClick={openMergeWindow}
+                                disabled={!canMergeToPdf}
+                                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title={!canMergeToPdf ? "Add at least 2 valid files to merge" : undefined}
+                            >
+                                <Archive className="h-3.5 w-3.5" />
+                                {t.mergeToPdf}
+                            </button>
+                            {mergedPdfUrl && (
+                                <button
+                                    onClick={downloadMergedPdf}
+                                    className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border border-green-200 dark:border-green-900 text-green-700 dark:text-green-300 hover:bg-green-50 dark:hover:bg-green-950 transition-colors"
+                                >
+                                    <Download className="h-3.5 w-3.5" />
+                                    {t.downloadMergedPdf}
+                                </button>
+                            )}
                             {hasCompletedFiles && (
                                 <button
                                     onClick={downloadAll}
@@ -317,6 +459,21 @@ export default function ConverterWorkspace() {
                             )}
                         </div>
                     </div>
+                    {(mergePdfError || mergedPdfUrl) && (
+                        <div className="text-xs">
+                            {mergePdfError && (
+                                <p className="text-red-500 dark:text-red-400">{mergePdfError}</p>
+                            )}
+                            {mergedPdfUrl && (
+                                <p className="text-green-600 dark:text-green-400">{t.mergedPdfReady}</p>
+                            )}
+                        </div>
+                    )}
+                    {!canMergeToPdf && files.length > 0 && (
+                        <p className="text-xs text-neutral-500 dark:text-neutral-500">
+                            Add at least 2 valid files to enable merge.
+                        </p>
+                    )}
 
                     <div className="divide-y divide-neutral-100 dark:divide-neutral-800/50 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-950">
                         {files.map((entry) => (
@@ -423,6 +580,19 @@ export default function ConverterWorkspace() {
                     </p>
                 </div>
             )}
+
+            <MergePdfWindow
+                open={isMergeWindowOpen}
+                files={orderedMergeFiles}
+                outputName={mergeOutputName}
+                onOutputNameChange={setMergeOutputName}
+                onMoveUp={(fileId) => moveMergeFile(fileId, -1)}
+                onMoveDown={(fileId) => moveMergeFile(fileId, 1)}
+                onClose={() => setIsMergeWindowOpen(false)}
+                onConfirm={mergeAllToPdf}
+                isSubmitting={isMergingPdf}
+                error={mergePdfError}
+            />
         </div>
     );
 }

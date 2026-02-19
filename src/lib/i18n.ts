@@ -2,6 +2,7 @@ export const translations = {
     en: {
         // Header
         converter: "Converter",
+        mergePdfNav: "Merge PDF",
         about: "About",
         privacy: "Privacy",
 
@@ -36,12 +37,28 @@ export const translations = {
         fileConverter: "File converter",
         fileConverterDesc:
             "Upload files, select the target format, and download the converted result.",
+        mergePdfPageTitle: "Merge Files Into One PDF",
+        mergePdfPageDesc:
+            "Upload files, reorder them, rename the output, preview, and generate a single PDF.",
         dropFiles: "Drop files here, or click to browse",
         dropFilesHint: "Images, documents, audio, video, archives",
         uploading: "Uploading...",
         filesQueued: (n: number) => `${n} file${n !== 1 ? "s" : ""} queued`,
         downloadAll: (n: number) => `Download all (${n})`,
         convertAll: "Convert all",
+        mergeToPdf: "Merge to PDF",
+        merging: "Merging...",
+        mergedPdfReady: "Merged PDF ready",
+        downloadMergedPdf: "Download merged PDF",
+        mergeRequireTwo: "Add at least 2 valid files to enable merge.",
+        mergeWindowTitle: "Merge Files Into One PDF",
+        mergeWindowDesc: "Rename the output, reorder files, and preview before generating.",
+        outputPdfName: "Output PDF name",
+        filesInOrder: "Files in final order",
+        preview: "Preview",
+        moveUp: "Move up",
+        moveDown: "Move down",
+        close: "Close",
         convert: "Convert",
         processing: "Processing",
         done: "Done",
@@ -110,6 +127,7 @@ export const translations = {
     pt: {
         // Header
         converter: "Conversor",
+        mergePdfNav: "Juntar PDF",
         about: "Sobre",
         privacy: "Privacidade",
 
@@ -144,12 +162,28 @@ export const translations = {
         fileConverter: "Conversor de arquivos",
         fileConverterDesc:
             "Envie arquivos, selecione o formato de destino e baixe o resultado convertido.",
+        mergePdfPageTitle: "Juntar Arquivos em Um PDF",
+        mergePdfPageDesc:
+            "Envie arquivos, organize a ordem, renomeie o arquivo final, visualize e gere um unico PDF.",
         dropFiles: "Arraste arquivos aqui ou clique para selecionar",
         dropFilesHint: "Imagens, documentos, audio, video, arquivos compactados",
         uploading: "Enviando...",
         filesQueued: (n: number) => `${n} arquivo${n !== 1 ? "s" : ""} na fila`,
         downloadAll: (n: number) => `Baixar todos (${n})`,
         convertAll: "Converter todos",
+        mergeToPdf: "Juntar em PDF",
+        merging: "Juntando...",
+        mergedPdfReady: "PDF unificado pronto",
+        downloadMergedPdf: "Baixar PDF unificado",
+        mergeRequireTwo: "Adicione pelo menos 2 arquivos validos para habilitar a unificacao.",
+        mergeWindowTitle: "Juntar Arquivos em Um PDF",
+        mergeWindowDesc: "Renomeie o arquivo final, ordene os anexos e visualize antes de gerar.",
+        outputPdfName: "Nome do PDF final",
+        filesInOrder: "Arquivos na ordem final",
+        preview: "Visualizar",
+        moveUp: "Subir",
+        moveDown: "Descer",
+        close: "Fechar",
         convert: "Converter",
         processing: "Processando",
         done: "Concluido",
